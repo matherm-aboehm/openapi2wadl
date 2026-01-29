@@ -23,9 +23,6 @@ OSB_PATH = ""
 NULL_MODE = "nillable"
 ARRAY_MODE = "inline"
 
-WADL_PARAM_MODE = "full"
-WSDL_PARAM_MODE = "header"
-
 SERVICE_NAME = "MyServiceName"
 SERVICE_VERSION = "1.0"
 
@@ -681,19 +678,17 @@ def generate_xsd(root_schemas,element_registry,nullability_registry,restriction_
 # ####################################################################################################
 # Genera lo operationId
 # ####################################################################################################
-def derive_operation_id(path,method_name):
+def derive_operation_id(path, method_name):
 
-    parts = path.strip("/").split("/")
-
-    operation_id_parts = []
-    for part in parts:
-        if part.startswith("{") and part.endswith("}"):
-            param = part[1:-1]
-            operation_id_parts.append(f"By{param[0].upper()+param[1:]}")
-        else:
-            operation_id_parts.append(part[0].upper()+part[1:].lower())
-
-    return method_name.lower()+(''.join(operation_id_parts) if operation_id_parts else "Root")
+    # Split del path, ignora parti vuote
+    parts = [p for p in path.strip('/').split('/') if p]
+    
+    # Trova l'ultima parte fissa (non {param})
+    fixed_parts = [p for p in parts if not (p.startswith('{') and p.endswith('}'))]
+    if not fixed_parts:
+        return method_name 
+    
+    return fixed_parts[-1]
 
 # ####################################################################################################
 # Genera il file WADL
@@ -734,7 +729,7 @@ def generate_wadl(spec,version,root_responses,root_parameters,root_schemas,xsd_f
         resource = ET.SubElement(resources,f"{{{WADL_NAMESPACE}}}resource", path=path)
 
         # ------------------------------------------------------------------------------------------------
-        # Genera Method & Request
+        # Genera Method
         # ------------------------------------------------------------------------------------------------
         
         for method_name, method_def in methods.items():
@@ -751,19 +746,24 @@ def generate_wadl(spec,version,root_responses,root_parameters,root_schemas,xsd_f
 
             # Genera elemento XML del metodo
             method = ET.SubElement(resource, f"{{{WADL_NAMESPACE}}}method", name=method_name.upper(), id=operationId, attrib={f"{{{SOA_NAMESPACE}}}wsdlOperation":operationId})
+                                                                                    
+            # ------------------------------------------------------------------------------------------------
+            # Genera Request
+            # ------------------------------------------------------------------------------------------------ 
+
+            # Prepara nomi per gli element di interfaccia
+            request_name = operationId+"Request"
 
             # Genera elemento WADL della request del metodo
             request_elem = ET.SubElement(method,f"{{{WADL_NAMESPACE}}}request")
-                                                                                    
-            # ------------------------------------------------------------------------------------------------
-            # Genera Request Parameters
-            # ------------------------------------------------------------------------------------------------ 
 
-            # Prepara elemento XSD dei parametri
-            parameters_node = None
+            # Prepara elemento XSD di request dell'operation
+            request_node = ET.Element(f"{{{XSD_NAMESPACE}}}element", name=request_name)
+            element_registry[request_name] = request_node            
+            sequence = None
 
             # Gestione dei parameters diversi da body
-            for param in parameters:                      
+            for param in parameters:
 
                 # Se si tratta di un parametro $ref lo risolve
                 param = resolve_ref_parameters(param,root_parameters)
@@ -786,42 +786,23 @@ def generate_wadl(spec,version,root_responses,root_parameters,root_schemas,xsd_f
                    schema = param.get("schema")
                    
                 # Se necessario mappa il tipo del parametro
-                if WADL_PARAM_MODE=="atomic":
-                    param_type = map_type_atomic(schema)
-                else:                
-                    param_type = map_type(schema,nullability_registry,restriction_registry)
+                param_type = map_type_atomic(schema)
                 
                 # Aggiunge parametro all'elemento WADL                
                 ET.SubElement(request_elem,f"{{{WADL_NAMESPACE}}}param", name=param_name, style=param_style, type=param_type, required=str(param_required).lower(),attrib={
                     f"{SOA_PREFIX}:expression": "$msg.parameters/"+param_name
-                })                     
+                })     
                 
-                # Creazione elemento XSD dei parametri
-                if not parameters_node:                
-                    parameters_name = operationId+"Parameters"
-                    parameters_node = ET.Element(f"{{{XSD_NAMESPACE}}}element", name=parameters_name)
-                    complex_type = ET.SubElement(parameters_node,f"{{{XSD_NAMESPACE}}}complexType")
+                # Aggiunge parametro all'elemento XSD
+                if not sequence:
+                    complex_type = ET.SubElement(request_node,f"{{{XSD_NAMESPACE}}}complexType")
                     sequence = ET.SubElement(complex_type,f"{{{XSD_NAMESPACE}}}sequence")
-                    element_registry[parameters_name] = parameters_node         
-
-                # Aggiunge parametro ad elemento XSD dei parametri
+                
                 param_elem = ET.SubElement(sequence,f"{{{XSD_NAMESPACE}}}element", name=param_name, type=param_type) 
                 
                 if not param_required:
                    param_elem.set("minOccurs","0");
-
-            # ------------------------------------------------------------------------------------------------
-            # Genera Request Body
-            # ------------------------------------------------------------------------------------------------ 
                     
-            # Prepara nomi per gli element di interfaccia
-            request_name = operationId+"Request"
-
-            # Prepara elemento XSD di request dell'operation
-            request_node = ET.Element(f"{{{XSD_NAMESPACE}}}element", name=request_name)
-            element_registry[request_name] = request_node            
-            sequence = None
-            
             # Gestione dei representation di request body (swagger2)
             if version == "swagger2":
                         
@@ -995,23 +976,16 @@ def generate_wsdl(application, xsd_filename):
             # Se manca operation_name lo ricava dal path estraendone l'ultimo token ignorando eventuali parametri
             if not operation_name:
                 operation_name = derive_operation_id(path,method.attrib.get("name"))            
-
-            # Determina i parametri della request
-            parameters = method.findall(f".//{{{WADL_NAMESPACE}}}param")      
         
-            # Messaggio di input (con eventuali parametri)
+            # Crea i message            
             msg_in = ET.SubElement(wsdl, f"{{{WSDL_NAMESPACE}}}message", name=f"{operation_name}_InputMessage")
-            ET.SubElement(msg_in, f"{{{WSDL_NAMESPACE}}}part", name="request", element=f"{TARGET_PREFIX}:{operation_name}Request")   
-            
-            if len(parameters)>0:
-               ET.SubElement(msg_in, f"{{{WSDL_NAMESPACE}}}part", name="parameters", element=f"{TARGET_PREFIX}:{operation_name}Parameters")
+            ET.SubElement(msg_in, f"{{{WSDL_NAMESPACE}}}part", name="parameters", element=f"{TARGET_PREFIX}:{operation_name}Request")                  
 
-            # Messaggio di output
             msg_out = ET.SubElement(wsdl, f"{{{WSDL_NAMESPACE}}}message", name=f"{operation_name}_OutputMessage")            
-            ET.SubElement(msg_out, f"{{{WSDL_NAMESPACE}}}part", name="response", element=f"{TARGET_PREFIX}:{operation_name}Response")
+            ET.SubElement(msg_out, f"{{{WSDL_NAMESPACE}}}part", name="parameters", element=f"{TARGET_PREFIX}:{operation_name}Response")
 
-            # Salva informazioni su operations per portType/binding
-            operations.append([operation_name,operation_soa,len(parameters)>0])
+            # Salva operation_name per portType/binding
+            operations.append([operation_name,operation_soa])
 
     # ================================================================================================
     # Genera PortType
@@ -1046,18 +1020,10 @@ def generate_wsdl(application, xsd_filename):
             binding.append(ET.Comment(" ~~~~~~~~ "))
 
         op = ET.SubElement(binding, f"{{{WSDL_NAMESPACE}}}operation", name=operation[1])
-        ET.SubElement(op, f"{{{SOAP_NAMESPACE}}}operation", soapAction=operation[1], style="document" if not operation[2] or WSDL_PARAM_MODE=="header" else "rpc")
-        
-        # Gestisce input
-        input_elem = ET.SubElement(op, f"{{{WSDL_NAMESPACE}}}input");
-        
-        if not operation[2] or WSDL_PARAM_MODE=="body":
-           input_elem.append(ET.Element(f"{{{SOAP_NAMESPACE}}}body", use="literal"))
-        else:
-           input_elem.append(ET.Element(f"{{{SOAP_NAMESPACE}}}body", use="literal", parts="request"))
-           input_elem.append(ET.Element(f"{{{SOAP_NAMESPACE}}}header", use="literal", part="parameters", message=f"{TARGET_PREFIX}:{operation[0]}_InputMessage")) 
-        
-        # Gestisce input
+        ET.SubElement(op, f"{{{SOAP_NAMESPACE}}}operation", soapAction=operation[1], style="document")
+        ET.SubElement(op, f"{{{WSDL_NAMESPACE}}}input").append(
+            ET.Element(f"{{{SOAP_NAMESPACE}}}body", use="literal")
+        )
         ET.SubElement(op, f"{{{WSDL_NAMESPACE}}}output").append(
             ET.Element(f"{{{SOAP_NAMESPACE}}}body", use="literal")
         )
@@ -1159,8 +1125,6 @@ def main():
     global OSB_PATH
     global NULL_MODE
     global ARRAY_MODE
-    global WADL_PARAM_MODE
-    global WSDL_PARAM_MODE
     global SERVICE_NAME
     global SERVICE_VERSION
     global TARGET_NAMESPACE
@@ -1175,22 +1139,12 @@ def main():
         b = "union"
         c = "nillable"
         
-    class WadlParamMode(enum.Enum):
-        a = "full"
-        b = "atomic"
-      
-    class WsdlParamMode(enum.Enum):
-        a = "body"
-        b = "header"
-        
     # definisce argomenti a command line e ne fa il parsin
     parser = argparse.ArgumentParser(description="Convert Swagger 2.0 or OpenAPI 3.0 JSON to WADL + XSD",formatter_class=ArgsCustomFormatter)
     parser.add_argument("descriptor_file", help="Path to Swagger/OpenAPI JSON file")
     parser.add_argument("--ns", default=TARGET_NAMESPACE, help="Target namespace")
     parser.add_argument("--null-mode", default=NULL_MODE, type=NullMode, help="Null values conversion behaviour", action=ArgsEnumAction)
     parser.add_argument("--array-mode", default=ARRAY_MODE, type=ArrayMode, help="Array values conversion behaviour", action=ArgsEnumAction)
-    parser.add_argument("--wadl-param", default=WADL_PARAM_MODE, type=WadlParamMode, help="WADL parameters typing", action=ArgsEnumAction)
-    parser.add_argument("--wsdl-param", default=WSDL_PARAM_MODE, type=WsdlParamMode, help="WSDL parameters location", action=ArgsEnumAction)
     parser.add_argument("--osb-path", default="<auto-detect>", help="OSB resources path ref prefix")
     parser.add_argument("--xsd-prefix", default="XS_", help="XSD filename prefix")
     parser.add_argument("--wadl-prefix", default="WA_", help="WADL filename prefix")
@@ -1205,8 +1159,6 @@ def main():
     # aggiorna altri parametri globali in base a argomenti command-line
     NULL_MODE = args.null_mode if isinstance(args.null_mode,str) else args.null_mode.value
     ARRAY_MODE = args.array_mode if isinstance(args.array_mode,str) else args.array_mode.value
-    WADL_PARAM_MODE = args.wadl_param if isinstance(args.wadl_param,str) else args.wadl_param.value
-    WSDL_PARAM_MODE = args.wsdl_param if isinstance(args.wsdl_param,str) else args.wsdl_param.value
     SERVICE_NAME = args.wsdl_name
     SERVICE_VERSION = args.wsdl_ver
     TARGET_NAMESPACE = args.ns
@@ -1214,8 +1166,6 @@ def main():
     print("")
     print("NULL_MODE:",NULL_MODE)
     print("ARRAY_MODE:",ARRAY_MODE)
-    print("WADL_PARAM_MODE:",WADL_PARAM_MODE)
-    print("WSDL_PARAM_MODE:",WSDL_PARAM_MODE)
     print("SERVICE_NAME:",SERVICE_NAME)
     print("SERVICE_VERSION:",SERVICE_VERSION)
     print("TARGET_NAMESPACE:",TARGET_NAMESPACE)
