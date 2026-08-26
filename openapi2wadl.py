@@ -478,7 +478,8 @@ def generate_xsd_type(level, parent_element, root_name, def_body, root_schemas, 
         # acquisisce eventuali limiti dell'array
         min_len = def_body.get("minItems","0")
         max_len = def_body.get("maxItems","unbounded")
-        
+        array_type = None
+
         # crea nodi per array
         if ARRAY_MODE=="inline":
             array_element = parent_element
@@ -492,7 +493,7 @@ def generate_xsd_type(level, parent_element, root_name, def_body, root_schemas, 
             })
         
         # se è un nodo radice aggiunge l'attributo del nome
-        if (root_name!=""):
+        if (root_name!="" and array_type is not None):
            array_type.set("name",root_name)
         
         # genera definizione del tipo in modo ricorsivo
@@ -815,7 +816,8 @@ def generate_wadl(spec,version,root_responses,root_parameters,root_schemas,xsd_f
                     
                         # Se non è uno schema $ref non lo gestisce e aggiunge solo elemento WADL, altrimenti procede
                         if not schema_ref:
-                            ET.SubElement(request_elem,f"{{{WADL_NAMESPACE}}}representation", mediaType=media_type)  
+                            for media_type in consumes: 
+                                ET.SubElement(request_elem,f"{{{WADL_NAMESPACE}}}representation", mediaType=media_type)  
                         else:
                             type_name = schema_ref.split("/")[-1]      
                             
