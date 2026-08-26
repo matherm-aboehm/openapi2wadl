@@ -483,8 +483,8 @@ def generate_xsd_type(level, parent_element, root_name, def_body, root_schemas, 
         # crea nodi per array
         if ARRAY_MODE=="inline":
             array_element = parent_element
-            array_element.set("minOccurs",min_len)
-            array_element.set("maxOccurs",max_len)
+            array_element.set("minOccurs",f"{min_len}")
+            array_element.set("maxOccurs",f"{max_len}")
         else:
             array_type = ET.SubElement(parent_element,f"{{{XSD_NAMESPACE}}}complexType")             
             array_sequence = ET.SubElement(array_type, f"{{{XSD_NAMESPACE}}}sequence")
