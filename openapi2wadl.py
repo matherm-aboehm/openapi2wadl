@@ -527,6 +527,9 @@ def generate_xsd_type(level, parent_element, root_name, def_body, root_schemas, 
             if prop_name not in def_required:
                 element_attrib["minOccurs"] = "0"
 
+                if NULL_MODE!="union":
+                    element_attrib["nillable"] = "true"
+
             # acquisisce attributi proprietà
             prop_ref = prop_attrs.get("$ref",""); 
             prop_type = prop_attrs.get("type"); 
