@@ -181,6 +181,33 @@ def resolve_ref(schema, root_schemas, seen=None):
     return schema
 
 # ####################################################################################################
+# Recursively resolves allOf, avoiding infinite loops and merging properties.
+# This is required as a workaround for the missing intersection concept in XSD.
+# ####################################################################################################       
+def resolve_allOf(schema, root_schemas, seen=None):
+    
+    if "allOf" in schema:
+        
+        schema = schema.copy()
+        all_schemas = schema.pop("allOf")
+        
+        for sub_schema in all_schemas:
+            
+            # resolves all $refs in sub schema
+            sub_schema = resolve_ref(sub_schema, root_schemas).copy()
+
+            # remove the $ref item from sub schema, because the parent should not know of that
+            sub_schema.pop("$ref", None)
+            
+            # recurse into resolving allOf of sub schema
+            sub_schema = resolve_allOf(sub_schema, root_schemas)
+            
+            # TODO: check for unmergable properties like "type" before doing the merge
+            schema = {**sub_schema, **schema}
+            
+    return schema
+
+# ####################################################################################################
 # Acquisce le restrizioni dalle proprietà dal swagger/openapi
 # ####################################################################################################
 def get_restrictions(schema):
@@ -475,9 +502,12 @@ def generate_xsd_type(level, parent_element, root_name, def_body, root_schemas, 
 
     # verifica se si tratta di un $ref
     def_ref = def_body.get("$ref","");                    
-                    
+
     # risolve eventuali $ref sullo schema body
-    def_body = resolve_ref(def_body, root_schemas)      
+    def_body = resolve_ref(def_body, root_schemas)
+
+    # handle the allOf by merging all properties together as a workaround
+    def_body = resolve_allOf(def_body, root_schemas)
 
     #  determina il tipo dello schema
     def_type = def_body.get("type", "object");    
