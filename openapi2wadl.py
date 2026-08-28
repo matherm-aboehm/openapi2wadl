@@ -419,7 +419,7 @@ def map_type(schema, nullability_registry, restriction_registry):
 # ####################################################################################################
 # Genera Element/SimpleType
 # ####################################################################################################    
-def generate_xsd_simple_type(level, parent_element, schema, nullability_registry, restriction_registry):
+def generate_xsd_simple_type(level, parent_element, root_name, schema, nullability_registry, restriction_registry):
 
     # se si tratta di un ref lo gestisce ad hoc
     if "$ref" in schema:
@@ -437,12 +437,17 @@ def generate_xsd_simple_type(level, parent_element, schema, nullability_registry
     # riacquisisce parametri tipo 
     type_nullable = schema.get("nullable", False) and NULL_MODE!="nillable"    
     type_restrictions = get_restrictions(schema)
+    simple_type = None
     
     # crea il nodo xml appropriato al tipo dell'elemento
     if not type_restrictions:
     
         if not type_nullable:
-            parent_element.set('type',mapped_type)
+            if root_name=="":
+                parent_element.set('type',mapped_type)
+            else:
+                simple_type = ET.SubElement(parent_element, f"{{{XSD_NAMESPACE}}}simpleType")
+                ET.SubElement(simple_type, f"{{{XSD_NAMESPACE}}}restriction", base=mapped_type)
         else:
             simple_type = ET.SubElement(parent_element, f"{{{XSD_NAMESPACE}}}simpleType")
             union = ET.SubElement(simple_type, f"{{{XSD_NAMESPACE}}}union", memberTypes=f"{mapped_type} {TARGET_PREFIX}:emptyString")    
@@ -457,6 +462,11 @@ def generate_xsd_simple_type(level, parent_element, schema, nullability_registry
         inline = ET.SubElement(union, f"{{{XSD_NAMESPACE}}}simpleType")
         restriction = ET.SubElement(inline, f"{{{XSD_NAMESPACE}}}restriction", base=mapped_type)
         map_restrictions(restriction, type_restrictions)
+
+    # se è un nodo radice aggiunge l'attributo del nome
+    if (root_name!="" and simple_type is not None):
+        simple_type.set("name",root_name)
+
 
 # ####################################################################################################
 # Genera ComplexType
@@ -556,12 +566,12 @@ def generate_xsd_type(level, parent_element, root_name, def_body, root_schemas, 
                 simple_element = ET.SubElement(sequence,f"{{{XSD_NAMESPACE}}}element", attrib=element_attrib)
                 
                 # genera definizione del tipo
-                generate_xsd_simple_type(level,simple_element,prop_attrs,nullability_registry,restriction_registry)                                
+                generate_xsd_simple_type(level,simple_element,"",prop_attrs,nullability_registry,restriction_registry)                                
 
     else:
 
         # genera definizione del tipo
-        generate_xsd_simple_type(level,parent_element,def_body,nullability_registry,restriction_registry)  
+        generate_xsd_simple_type(level,parent_element,root_name,def_body,nullability_registry,restriction_registry)  
 
 # ####################################################################################################
 # Genera il file XSD
