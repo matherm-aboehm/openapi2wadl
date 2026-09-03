@@ -22,6 +22,7 @@ from xml.dom import minidom
 OSB_PATH = ""
 NULL_MODE = "nillable"
 ARRAY_MODE = "inline"
+ROOT_MODE = "method"
 
 SERVICE_NAME = "MyServiceName"
 SERVICE_VERSION = "1.0"
@@ -867,13 +868,14 @@ def generate_wadl(spec,version,root_responses,root_parameters,root_schemas,xsd_f
                             for media_type in consumes:          
 
                                 # Aggiunge body all'elemento WADL                                            
-                                ET.SubElement(request_elem,f"{{{WADL_NAMESPACE}}}representation", mediaType=media_type, element=f"{TARGET_PREFIX}:{request_name}")
+                                ET.SubElement(request_elem,f"{{{WADL_NAMESPACE}}}representation", mediaType=media_type, element=f"{TARGET_PREFIX}:{request_name if ROOT_MODE!="type" else type_name}")
                                 
                                 # Aggiunge body all'elemento XSD
                                 if not sequence:
-                                   request_node.set("type",f"{TARGET_PREFIX}:{type_name}")
+                                    request_node.set("type",f"{TARGET_PREFIX}:{type_name}")
+                                    if ROOT_MODE=="type": request_node.set("name", type_name)
                                 else:
-                                   ET.SubElement(sequence,f"{{{XSD_NAMESPACE}}}element", name=request_name, type=f"{TARGET_PREFIX}:{type_name}")                    
+                                   ET.SubElement(sequence,f"{{{XSD_NAMESPACE}}}element", name=request_name if ROOT_MODE!="type" else type_name, type=f"{TARGET_PREFIX}:{type_name}")                    
                 
             # Gestione dei representation per i request body (openapi3)
             if version == "openapi3":
@@ -893,13 +895,14 @@ def generate_wadl(spec,version,root_responses,root_parameters,root_schemas,xsd_f
                         type_name = schema_ref.split("/")[-1]
 
                         # Aggiunge body all'elemento WADL                                                               
-                        ET.SubElement(request_elem,f"{{{WADL_NAMESPACE}}}representation", mediaType=media_type, element=f"{TARGET_PREFIX}:{request_name}")
+                        ET.SubElement(request_elem,f"{{{WADL_NAMESPACE}}}representation", mediaType=media_type, element=f"{TARGET_PREFIX}:{request_name if ROOT_MODE!="type" else type_name}")
                         
                         # Aggiunge body all'elemento XSD
                         if not sequence:
-                           request_node.set("type",f"{TARGET_PREFIX}:{type_name}")
+                            request_node.set("type",f"{TARGET_PREFIX}:{type_name}")
+                            if ROOT_MODE=="type": request_node.set("name", type_name)
                         else:
-                           ET.SubElement(sequence,f"{{{XSD_NAMESPACE}}}element", name=request_name, type=f"{TARGET_PREFIX}:{type_name}")                    
+                           ET.SubElement(sequence,f"{{{XSD_NAMESPACE}}}element", name=request_name if ROOT_MODE!="type" else type_name, type=f"{TARGET_PREFIX}:{type_name}")                    
                                         
             # ------------------------------------------------------------------------------------------------
             # Gestisce Responses
@@ -945,7 +948,7 @@ def generate_wadl(spec,version,root_responses,root_parameters,root_schemas,xsd_f
                             type_name = schema_ref.split("/")[-1]
                             
                             # Aggiunge body all'elemento WADL                                                               
-                            ET.SubElement(response_elem,f"{{{WADL_NAMESPACE}}}representation", mediaType=media_type, element=f"{TARGET_PREFIX}:{response_name}")
+                            ET.SubElement(response_elem,f"{{{WADL_NAMESPACE}}}representation", mediaType=media_type, element=f"{TARGET_PREFIX}:{response_name if ROOT_MODE!="type" or status!="200" else type_name}")
                             
                             # Se è già stato aggiunto un elemento all'XSD genera eccezione
                             if response_name in element_registry:
@@ -953,7 +956,7 @@ def generate_wadl(spec,version,root_responses,root_parameters,root_schemas,xsd_f
                                 sys.exit()
                                 
                             # Aggiunge body all'elemento XSD
-                            element_registry[response_name] = ET.Element(f"{{{XSD_NAMESPACE}}}element", name=response_name, type=f"{TARGET_PREFIX}:{type_name}")                           
+                            element_registry[response_name] = ET.Element(f"{{{XSD_NAMESPACE}}}element", name=response_name if ROOT_MODE!="type" or status!="200" else type_name, type=f"{TARGET_PREFIX}:{type_name}")                           
 
     # ================================================================================================
 
@@ -1017,6 +1020,10 @@ def generate_wsdl(application, xsd_filename):
             # Prepara operation
             operation_name = method.attrib.get("id") 
             operation_soa = method.attrib.get(f"{{{SOA_NAMESPACE}}}wsdlOperation") 
+            request_node = method.find(f"./{{{WADL_NAMESPACE}}}request/{{{WADL_NAMESPACE}}}representation[@mediaType='application/xml']")
+            response_node = method.find(f"./{{{WADL_NAMESPACE}}}response[@status='200']/{{{WADL_NAMESPACE}}}representation[@mediaType='application/xml']")
+            request_name = request_node.attrib.get("element") if request_node is not None else None
+            response_name = response_node.attrib.get("element") if response_node is not None else None
 
             # Se manca operation_name lo ricava dal path estraendone l'ultimo token ignorando eventuali parametri
             if not operation_name:
@@ -1024,10 +1031,10 @@ def generate_wsdl(application, xsd_filename):
         
             # Crea i message            
             msg_in = ET.SubElement(wsdl, f"{{{WSDL_NAMESPACE}}}message", name=f"{operation_name}_InputMessage")
-            ET.SubElement(msg_in, f"{{{WSDL_NAMESPACE}}}part", name="parameters", element=f"{TARGET_PREFIX}:{operation_name}Request")                  
+            ET.SubElement(msg_in, f"{{{WSDL_NAMESPACE}}}part", name="parameters", element=f"{TARGET_PREFIX}:{operation_name}Request" if not request_name else request_name)                  
 
             msg_out = ET.SubElement(wsdl, f"{{{WSDL_NAMESPACE}}}message", name=f"{operation_name}_OutputMessage")            
-            ET.SubElement(msg_out, f"{{{WSDL_NAMESPACE}}}part", name="parameters", element=f"{TARGET_PREFIX}:{operation_name}Response")
+            ET.SubElement(msg_out, f"{{{WSDL_NAMESPACE}}}part", name="parameters", element=f"{TARGET_PREFIX}:{operation_name}Response" if not response_name else response_name)
 
             # Salva operation_name per portType/binding
             operations.append([operation_name,operation_soa])
@@ -1170,6 +1177,7 @@ def main():
     global OSB_PATH
     global NULL_MODE
     global ARRAY_MODE
+    global ROOT_MODE
     global SERVICE_NAME
     global SERVICE_VERSION
     global TARGET_NAMESPACE
@@ -1184,12 +1192,17 @@ def main():
         b = "union"
         c = "nillable"
         
+    class RootMode(enum.Enum):
+        a = "method"
+        b = "type"
+        
     # definisce argomenti a command line e ne fa il parsin
     parser = argparse.ArgumentParser(description="Convert Swagger 2.0 or OpenAPI 3.0 JSON to WADL + XSD",formatter_class=ArgsCustomFormatter)
     parser.add_argument("descriptor_file", help="Path to Swagger/OpenAPI JSON file")
     parser.add_argument("--ns", default=TARGET_NAMESPACE, help="Target namespace")
     parser.add_argument("--null-mode", default=NULL_MODE, type=NullMode, help="Null values conversion behaviour", action=ArgsEnumAction)
     parser.add_argument("--array-mode", default=ARRAY_MODE, type=ArrayMode, help="Array values conversion behaviour", action=ArgsEnumAction)
+    parser.add_argument("--root-mode", default=ROOT_MODE, type=RootMode, help="Root element name generation behaviour", action=ArgsEnumAction)
     parser.add_argument("--osb-path", default="<auto-detect>", help="OSB resources path ref prefix")
     parser.add_argument("--xsd-prefix", default="XS_", help="XSD filename prefix")
     parser.add_argument("--wadl-prefix", default="WA_", help="WADL filename prefix")
@@ -1204,6 +1217,7 @@ def main():
     # aggiorna altri parametri globali in base a argomenti command-line
     NULL_MODE = args.null_mode if isinstance(args.null_mode,str) else args.null_mode.value
     ARRAY_MODE = args.array_mode if isinstance(args.array_mode,str) else args.array_mode.value
+    ROOT_MODE = args.root_mode if isinstance(args.root_mode,str) else args.root_mode.value
     SERVICE_NAME = args.wsdl_name
     SERVICE_VERSION = args.wsdl_ver
     TARGET_NAMESPACE = args.ns
@@ -1211,6 +1225,7 @@ def main():
     print("")
     print("NULL_MODE:",NULL_MODE)
     print("ARRAY_MODE:",ARRAY_MODE)
+    print("ROOT_MODE:",ROOT_MODE)
     print("SERVICE_NAME:",SERVICE_NAME)
     print("SERVICE_VERSION:",SERVICE_VERSION)
     print("TARGET_NAMESPACE:",TARGET_NAMESPACE)
